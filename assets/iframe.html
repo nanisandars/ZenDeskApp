@@ -1,0 +1,568 @@
+<html>
+<style>
+  /*Styles used to style the cloud cherry app for styling nps scores, current ticket information, last five nps scores etc..*/
+  .mom {
+    width: 100%;
+    display: table;
+  }  
+  .child {
+    display: table-cell;
+  }  
+  table td {
+    vertical-align: middle;
+  }  
+  .default {
+    background-color: white;
+    opacity: 0.5;
+  }  
+  .red {
+    background-color: #ff0000;
+    opacity: 0.7;
+  }  
+  .yellow {
+    background-color: #F2B41D;
+    opacity: 0.7;
+  }  
+  .green {
+    background-color: #399C46;
+    opacity: 0.7;
+  }  
+  .npsScore td {
+    border-left: #000000;
+    border-bottom: #000000;
+    padding-right: 2px;
+  }  
+  .value {
+    font-size: large;
+  }
+</style>
+
+<body>
+  <!--<h2>CloudCherry</h2>-->
+  <table style="width:100%;color:#fff;">
+    <tr>
+      <td align="left"><img src="CCLogo.png" /></td>
+      <td>
+        <img class="loading" id="loading" src="1-2.gif" style="vertical-align:middle;" /></td>
+    </tr>
+  </table>
+  <p id="apptext" class="app-text text-center">
+  </p>
+  <!-- https://github.com/zendesk/zendesk_app_framework_sdk -->
+  <script type="text/javascript" src="https://assets.zendesk.com/apps/sdk/2.0/zaf_sdk.js"></script>
+  <script src="https://code.jquery.com/jquery-3.1.1.min.js" integrity="sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8="
+    crossorigin="anonymous"></script>
+
+  <script>
+    /**
+     * Global array variables 
+     * npsCustomFieldID, checkNPSnCCTikcetExists
+     * to hold ticket fields, last five nps scores which will be used through out the app
+     */
+    var npsCustomFieldID = [];
+    var checkNPSnCCTikcetExists = [];
+
+    /**
+     * Initialise the Zendesk JavaScript API client using ZAFClient.init() 
+     */
+    var client = ZAFClient.init();
+    client.invoke('resize', { width: '100%', height: '400px' });
+
+    /**
+     * Validating Cloudcherry credentials that are stored in manifest.json by calling cloudcherry api 
+     * LoginToken using validateCCAuthentication function.
+     */
+    client.metadata().then(function (metadata) {
+        var cccredentials = metadata.settings;
+        validateCCAuthentication(cccredentials.ccusername, cccredentials.ccapikey);
+    });
+
+    /**
+     * on app registered event checking whether custom fields CCTICKET and NPSSCORE exists or not.
+     * If not present creating them and storing them in global variables for future reference.  
+     */
+    client.on('app.registered', function (e) {
+        client.request('/api/v2/ticket_fields.json').then(function (customFields) {
+            for (var fieldCounterNPS = 0; fieldCounterNPS < customFields.ticket_fields.length; fieldCounterNPS++) {
+                if ((customFields.ticket_fields[fieldCounterNPS].title.toUpperCase() == 'NPSSCORE') || (customFields.ticket_fields[fieldCounterNPS].title.toUpperCase() == 'CCTICKET')) {
+                    checkNPSnCCTikcetExists.push(customFields.ticket_fields[fieldCounterNPS].title);
+                }
+            }
+            //Creating APP fields for storing CC TicketId And NPS with Field Name : CCTicket
+            if (checkNPSnCCTikcetExists != null) {
+                if (checkNPSnCCTikcetExists.length == 0) {
+                    checkNPSnCCTikcetExists.push('CCTICKET');
+                    checkNPSnCCTikcetExists.push('NPSSCORE');
+                    npsCCticketArray(checkNPSnCCTikcetExists);
+                }
+            }
+        });
+    }); 
+    //End app.registered
+
+    /**
+     * ticket.updated event is fired when ever a ticket is updated in zendesk which takes the changed fields data and sends to cloudcherry
+     * web api which in turn updates the response object with the passed fields as note to the response object.  
+     */
+    client.on('ticket.updated', function () {
+        client.get('ticket').then(function (data) {
+            client.metadata().then(function (metadata) {
+                var getTicketURL =
+                    {
+                        url: '/api/v2/tickets/' + data.ticket.id,
+                        //headers: {"Authorization": "Bearer {{setting.token}}"},
+                        //secure: true,
+                        type: 'GET',
+                        contentType: 'application/json',
+                    };
+
+                client.request(getTicketURL).then(function (ticketData) {
+                    var getAllFieldsOfTicket =
+                        {
+                            url: '/api/v2/ticket_fields.json',
+                            //headers: {"Authorization": "Bearer {{setting.token}}"},
+                            //secure: true,
+                            type: 'GET',
+                            contentType: 'application/json',
+                        };
+                    client.request(getAllFieldsOfTicket).then(function (ticketFields) {
+                        var ccTicketFieldID = '';
+                        var CCTicket = '';
+                        var ticketFieldList = ticketFields.ticket_fields;
+                        for (var counter = 0; counter < ticketFieldList.length; counter++) {
+                            if (ticketFieldList[counter].title.toUpperCase() == 'CCTICKET') {
+                                ccTicketFieldID = ticketFieldList[counter].id.toString();
+                            }
+                        }
+                        var ticketFieldValues = ticketData.ticket.fields;
+                        for (var counter = 0; counter < ticketFieldValues.length; counter++) {
+                            if (ticketFieldValues[counter].id == ccTicketFieldID) {
+                                if ((ticketFieldValues[counter].value != null) && (ticketFieldValues[counter].value != undefined)) {
+                                    CCTicket = ticketFieldValues[counter].value.toString();
+                                }
+                            }
+                        }
+                        var getTicketAudit =
+                            {
+                                url: '/api/v2/tickets/' + parseInt(data.ticket.id) + '/audits.json',
+                                secure: true,
+                                type: 'GET'
+                            };
+                        client.request(getTicketAudit).then(function (response) {
+                            var cccredentials = metadata.settings;
+                            var currentTicketData = ticketData.ticket;
+                            var ccapikey = cccredentials.ccapikey;
+                            if (CCTicket != "") {
+                                var noteData = { "TicketAudit": JSON.stringify(response), "CCAPIKey": ccapikey, "CCTicket": CCTicket, "CCUserName": cccredentials.ccusername };
+                                var addANote =
+                                    {
+                                        url: 'https://cxapiconnect.getcloudcherry.com/api/ZendeskCC/AddANoteAtCCFromZD',
+                                        headers: { cors: true },
+                                        secure: true,
+                                        type: 'POST',
+                                        contentType: 'application/json',
+                                        data: JSON.stringify(noteData)
+                                    };
+                                console.log(JSON.stringify(noteData));
+                                client.request(addANote).then(function (response) {
+                                    console.log(response);
+                                }).catch(function (error) {
+                                    console.log(error); 
+                                    // "APIUnavailable: "nonExistantPath" Could not find handler for: "nonExistantPath"
+                                });
+                            }
+                        });
+                    });
+                });
+            });
+        });
+    });
+    //End of ticket.updated event
+
+    /**
+     * validateCCAuthentication()
+     * This function which accepts username, apikey as parameters and validates 
+     * user using loginToken api of cloudcherry
+     */
+    function validateCCAuthentication(username, apikey) {
+        var body = {
+            grant_type: 'password',
+            username: username,
+            password: apikey
+        };
+
+        $.ajax({
+            url: 'https://api.getcloudcherry.com/api/LoginToken',
+            type: 'POST',
+            dataType: 'json',
+            contentType: 'application/x-www-form-urlencoded; charset=UTF-8',
+            data: body,
+            success: function (result) {
+                //called when successful
+                isAuthenticatedWithCCSuccess(result.access_token);
+            },
+            error: function (result) {
+                //called when there is an error
+                handleError('Invalid CloudCherry Username or API Key..! Please enter valid username and apikey...');
+            },
+        });
+    }
+
+    /**
+     * handleError()
+     * This function is used to notify the user with the corresponding errors that happens in the life cycle of Cloudcherry app
+     * in zendesk. 
+     */
+    function handleError(errMsg) {
+        document.getElementById("apptext").innerHTML = '<h4>' + errMsg + '</h4>';
+        jQuery("#loading").hide();
+    }
+
+    /**
+     * npsCCticketArray()
+     * Adding custom fields 'CCTICKET', 'NPSSCORE' to existing ticket fields.
+     */
+    function npsCCticketArray(checkNPSnCCTikcetExists) {
+        for (var counter = 0; counter < checkNPSnCCTikcetExists.length; counter++) {
+            switch (checkNPSnCCTikcetExists[counter].toString().toUpperCase()) {
+
+                case 'CCTICKET':
+                    {
+                        var objCCTicket = { "ticket_field": { type: "text", title: "CCTicket", visible_in_portal: "true", editable_in_portal: "false", collapsed_for_agents: "false" } };
+                        var strObjCCTicket = JSON.stringify(objCCTicket);
+
+                        var fieldCreateURL = {
+                            url: '/api/v2/ticket_fields.json',
+                            type: 'POST',
+                            contentType: 'application/json',
+                            data: strObjCCTicket
+                        };
+                        client.request(fieldCreateURL).then(function (data) {
+                        });
+
+                        break;
+                    }
+
+                case 'NPSSCORE':
+                    {
+                        var objNPSSCORE = { "ticket_field": { type: "text", title: "NPSSCORE", visible_in_portal: "true", editable_in_portal: "false", collapsed_for_agents: "false" } };
+                        var strObjNPSSCORE = JSON.stringify(objNPSSCORE);
+                        var fieldCreateURL = {
+                            url: '/api/v2/ticket_fields.json',                            
+                            type: 'POST',
+                            contentType: 'application/json',
+                            data: strObjNPSSCORE
+                        };
+
+                        client.request(fieldCreateURL).then(function (data) {
+
+                        });
+                        break;
+                    }
+
+            }
+        }
+    }
+
+    /**
+     * isAuthenticatedWithCCSuccess()
+     * This function is used to get the NPS score of logged in user's data basing on the role of the zendesk user. 
+     */
+    function isAuthenticatedWithCCSuccess(ccaccesstoken) {
+        client.context().then(function (context) {
+
+            if (context.location.toLowerCase() == 'ticket_sidebar') {
+
+                var fetchSelf = { url: '/api/v2/users/me.json', type: 'GET', dataType: 'json' };
+
+                client.request(fetchSelf).then(function (roledata) {
+                    var currentUserRole = roledata.user.role;
+                    getNPS(ccaccesstoken, currentUserRole.toUpperCase());
+                });
+            }
+            else {
+                getPrevious5NPS(context.userId);
+            }
+        });
+    }
+
+    /**
+     * getNPS()
+     * This function accepts ccaccesstoken, role as the parameters and get average nps score of the ticket using 
+     * cloudcherry webapi. 
+     */
+    function getNPS(ccaccesstoken, role) {
+
+        client.context().then(function (context) {
+            client.request('/api/v2/tickets/' + parseInt(context.ticketId) + '.json').then(function (ticketData) {
+
+                var customFields = ticketData.ticket.custom_fields;
+                var npsScore;
+                var count = 0;
+                for (var counter = 0; counter < customFields.length; counter++) {
+                    client.request('/api/v2/ticket_fields/' + parseInt(customFields[counter].id) + '.json').then(function (customField) {
+                        if (customField.ticket_field.title.toUpperCase() == 'NPSSCORE') {
+                            npsFieldID = customField.ticket_field.id;
+
+                            for (var fieldCounter = 0; fieldCounter < customFields.length; fieldCounter++) {
+                                if (parseInt(npsFieldID) == parseInt(customFields[fieldCounter].id)) {
+                                    npsScore = customFields[fieldCounter].value;
+                                    var currentNPSHTML = displayNPS(npsScore);
+                                    jQuery("#apptext").append("<h4>NPS for this response</h4> " + currentNPSHTML);
+
+                                    if (customFields[fieldCounter].value == null) {
+                                        jQuery("#apptext").append('<h4 style="color:red;">No NPS found for this Ticket..</h4>');
+                                    }
+                                    if (role != 'ADMIN') {
+                                        jQuery("#loading").hide();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                if (role == "ADMIN") {
+
+                    var requesterID = ticketData.ticket.requester_id;
+                    var getUserData = { url: '/api/v2/users/' + parseInt(requesterID) + '.json', type: 'GET', dataType: 'json' };
+
+                    client.request(getUserData).then(function (userData) {
+
+                        var email = userData.user.email;
+                        var phone = userData.user.phone;
+
+                        var queryString = '?ccAccessToken=' + ccaccesstoken + '&reqEmail=' + email + '&reqMobile=' + phone;
+                        var avgNPSURL = {
+                            url: 'https://cxapiconnect.getcloudcherry.com/api/AverageNPSByUser/getAverageNPSByUser' + queryString,
+                            secure: true,
+                            type: 'GET',
+                            contentType: 'application/json',
+                        };
+
+                        client.request(avgNPSURL).then(function (avgNPSSCore) {
+                            var averageNPSHTML = displayNPS(avgNPSSCore);
+                            jQuery("#apptext").append("<h4>Average NPS score of the customer</h4>" + averageNPSHTML);
+                            jQuery("#loading").hide();
+                        }).catch(function (error) {
+                            jQuery("#apptext").append('<h4> Something went wrong ...! Please try again... </h4>');
+                            jQuery("#loading").hide();
+                        });
+
+                    }).catch(function (error) {
+                        console.log(error);
+                    });
+
+
+                    var historicalNPS = {
+                        url: 'https://api.getcloudcherry.com/api/HistoricDelightScore/400',
+                        secure: true,
+                        type: 'GET',
+                        contentType: 'application/json',
+                        headers: { "Authorization": "Bearer " + ccaccesstoken, "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "X-Requested-With", "content-type": "application/Json" }
+                    };
+
+                    client.request(historicalNPS).then(function (historicalnpsscore) {
+                        var htmlHistoricalNPS = getHistoricalNPS(historicalnpsscore);
+                        jQuery("#apptext").append(htmlHistoricalNPS);
+                    }).catch(function (error) {
+                        console.log(error);
+                        jQuery("#apptext").append('<h4> Something went wrong ...! Please try again... </h4>');
+                    });
+                }
+            });
+        });
+
+    }
+
+    /**
+     * displayNPS()
+     * This function is called from getNPS function which displays the nps score as graph in the Cloudcherry app.
+     */
+    function displayNPS(npsGiven) {
+        var indicator = '<image src="indicator.png">';
+        var npsIndicator = '';
+        if (npsGiven <= 10) {
+            if (npsGiven > -1) {
+                for (var counter = 0; counter <= npsGiven; counter++) {
+                    var valueCounter = parseInt(counter);
+                    if (npsGiven == valueCounter) {
+                        npsIndicator = npsIndicator + '<td>' + indicator + '</td>';
+                    }
+                    npsIndicator = npsIndicator + '<td></td>';
+
+                }
+            }
+        }
+        else if ((npsGiven == null) || (npsGiven == '')) {
+            npsIndicator = '<span style="color:black;">NPS Value is empty..!</span>';
+        }
+        else {
+            npsIndicator = '<span style="color:black;">NPS Value can not be more than 10 ..! OR Invalid Entry..</span>';
+        }
+
+        var htmlNPS = '<table><tr>' + npsIndicator + '</tr>';
+        htmlNPS = htmlNPS + '<tr><td style="background-color:#EE5350;vertical-align:middle;" width="40px" height="40px"  align="center"> <span style="color:white;"> 0 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#EE5350;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 1 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#EE5350;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 2 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#EE5350;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 3 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#EE5350;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 4 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#EE5350;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 5 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#EE5350;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 6 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#FBB038;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 7 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#FBB038;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 8 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#7EB77F;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 9 </span></td>';
+        htmlNPS = htmlNPS + '<td style="background-color:#7EB77F;vertical-align:middle;" width="40px" height="40px" align="center"> <span style="color:white;"> 10 </span></td>';
+        htmlNPS = htmlNPS + '</tr>';
+        htmlNPS = htmlNPS + ' <tr>  <td colspan="7" style="border-top: 2px solid rgb(283,83,80);">Very Unlikely</td>'
+        htmlNPS = htmlNPS + ' <td colspan="2" style="border-top: 2px solid rgb(251, 176, 59);">Maybe</td>'
+        htmlNPS = htmlNPS + '<td colspan="2" style="border-top: 2px solid rgb(126,183,127);"> Extremely Likely </td></tr></table>'
+
+        return htmlNPS;
+    }
+
+    /**
+     * getHistoricalNPS()
+     * This function is called from getNPS function which displays the historical nps score as graph in the Cloudcherry app. 
+     */
+    function getHistoricalNPS(historicalNPSData) {
+        var nps = '';
+        var htmlTicketADMIN = '';
+        if (historicalNPSData[0] != '') {
+            if (historicalNPSData[0].delightScores[0].location.toUpperCase() == 'ALL LOCATIONS') {
+                nps = historicalNPSData[0].delightScores[0].netpromoter.netPromoters;
+                var detractors = historicalNPSData[0].delightScores[0].netpromoter.detractors;
+                var promoters = historicalNPSData[0].delightScores[0].netpromoter.promoters;
+                var passive = historicalNPSData[0].delightScores[0].netpromoter.passive;
+                htmlTicketADMIN = '<div style="width:350px;"><div style="float:left;width:130px;height:90px;background-color:#EE5350;"></div><div style="float:left;width:70px;height:90px;background-color:#FBB038;"></div>';
+                htmlTicketADMIN = htmlTicketADMIN + '<div style="float:left;width:90px;height:90px;background-color:#7EB77F;">';
+                htmlTicketADMIN = htmlTicketADMIN + '<div style="margin-bottom:0px;"><span><h4 style="margin-left:25px;color:white;">NPS</h4><h2 style="margin-left:15px;margin-top:-12px;color:white;"><b style="margin-bottom:10px;">' + nps + '</b></h2></span></div></div></div>';
+                htmlTicketADMIN = htmlTicketADMIN + '<table><tr><td style="height: 50px;padding: 5px;text-align:left;color: #000000;font-size: 12px;">';
+                htmlTicketADMIN = htmlTicketADMIN + 'Detractors <div style="border-radius:25px;margin: 3px 0px;background-color: #EE5350;color: #FFF;height: 20px;line-height: 20px;font-size: 14px;text-align: center;font-weight: bold;">';
+                htmlTicketADMIN = htmlTicketADMIN + detractors;
+                htmlTicketADMIN = htmlTicketADMIN + ' </div> </td><td style="height: 50px;padding: 5px;text-align:left;color: #000000;font-size: 12px;">';
+                htmlTicketADMIN = htmlTicketADMIN + 'Passives';
+                htmlTicketADMIN = htmlTicketADMIN + ' <div style="border-radius:25px;margin: 3px 0px;background-color: #F2B41D;color: #FFF;height: 20px;line-height: 20px;font-size: 14px;text-align: center;font-weight: bold;">';
+                htmlTicketADMIN = htmlTicketADMIN + passive;
+                htmlTicketADMIN = htmlTicketADMIN + '</div>';
+                htmlTicketADMIN = htmlTicketADMIN + '</td> <td style="height: 50px;padding: 5px;text-align:left;color: #000000;font-size: 12px;">';
+                htmlTicketADMIN = htmlTicketADMIN + ' Promoters<div style="border-radius:25px;margin: 3px 0px;background-color: #399C46;color: #FFF;height: 20px;line-height: 20px;font-size: 14px;text-align: center;font-weight: bold;">';
+                htmlTicketADMIN = htmlTicketADMIN + promoters;
+                htmlTicketADMIN = htmlTicketADMIN + '</div></td></tr></table><div style="color: #000;font-weight: 600;text-align: center;">';
+                htmlTicketADMIN = htmlTicketADMIN + '</div> </p>';
+
+                return '<h4 style="color:black;"><b> Overall Organisation NPS </b></h4>' + htmlTicketADMIN;
+      
+            }
+            else {
+                htmlTicketADMIN = '<h5 style="color:black;">Data not found.</h5>';
+                return htmlTicketADMIN;
+            }
+        }
+        else {
+            htmlTicketADMIN = '<h5 style="color:black;">Data not found.</h5>';
+            return htmlTicketADMIN;
+        }
+    }
+
+    /**
+     * getPrevious5NPS()
+     * This function is used to get last five nps scores of the current ticket.
+     */
+    function getPrevious5NPS(userId) {
+
+        client.request('/api/v2/ticket_fields.json').then(function (customFields) {
+
+            for (var fieldCounterNPS = 0; fieldCounterNPS < customFields.ticket_fields.length; fieldCounterNPS++) {
+                if (customFields.ticket_fields[fieldCounterNPS].title.toUpperCase() == 'NPSSCORE') {
+                    npsCustomFieldID.push(customFields.ticket_fields[fieldCounterNPS].id);
+                }
+            }
+
+        }).catch(function (response) {
+            console.log(response);
+        });
+
+        client.request('/api/v2/users/' + parseInt(userId) + '/tickets/requested.json?sort_by=created_at&sort_order=desc').then(function (listTickets) {
+
+            var requesterTickets = listTickets.tickets;
+            var reqTicketsCount = parseInt(0);
+            if (requesterTickets.length < 5) {
+                reqTicketsCount = requesterTickets.length;
+            }
+            else {
+                reqTicketsCount = parseInt(5);
+            }
+
+            var htmlNPSContactHistory = '';  //<span style="color:black;">Last 5 NPS SCORES</span><br/><br/><table style="margin-left: -20px;" width="100%" class="npsScore" style="color:black;">';
+
+            for (var ticketsCounter = 0; ticketsCounter < reqTicketsCount; ticketsCounter++) {
+
+                var indexOFdate = requesterTickets[ticketsCounter].created_at.indexOf("T");
+                var createdDate = requesterTickets[ticketsCounter].created_at.toString().substring(0, parseInt(indexOFdate));
+
+                htmlNPSContactHistory = htmlNPSContactHistory + '<tr vertical-align="middle"><td colspan="2" align="right"> <span style="color:black;">' + createdDate + '</span></td>';
+
+                var customFields = requesterTickets[ticketsCounter].custom_fields;
+                for (var fieldsCounter = 0; fieldsCounter < customFields.length; fieldsCounter++) {
+                    if (customFields[fieldsCounter].id == npsCustomFieldID[0].toString()) {
+                        htmlNPSContactHistory = htmlNPSContactHistory + add5NPSRow(customFields[fieldsCounter].value);
+                    }
+                }
+            }
+
+
+            if (requesterTickets.length == 0) {
+                htmlNPSContactHistory = htmlNPSContactHistory + '<h4>No Tickets found for this user ... </h4>';
+            }
+            else if (npsCustomFieldID[0] == null) {
+                getPrevious5NPS(userId);
+            }
+
+            jQuery("#apptext").append('<b>Recent 5 NPS Scores. </b><br/> <table>' + htmlNPSContactHistory + "</table>");
+            jQuery("#loading").hide();
+        }).catch(function (response) {
+            //console.log(response);
+        });
+
+    }
+
+    /**
+     * add5NPSRow()
+     * This function is used by getPrevious5NPS to draw the number in red, yellow, green.
+     */
+    function add5NPSRow(npsreceived) {
+        var htmlCells = '';
+        if ((npsreceived == null) || (npsreceived == '')) {
+            htmlCells = htmlCells + '<td class="default" ><span style="color:black;"><b class="value">NO NPS found</b></span></td>';
+            return htmlCells;
+        }
+        else {
+            var currentNPS = parseInt(npsreceived);
+            var setClass = '';
+            if (currentNPS >= 0 && currentNPS <= 6) {
+                setClass = "class='red'";
+            }
+            else if (currentNPS >= 7 && currentNPS <= 8) {
+                setClass = "class='yellow'";
+            }
+            else if (currentNPS >= 9 && currentNPS <= 10) {
+                setClass = "class='green'";
+            }
+
+            for (var index = 0; index < currentNPS; index++) {
+                if (currentNPS == 1) {
+                    htmlCells = htmlCells + '<td ' + setClass + '></td><td class="default" ><span style="color:black;"><b class="value">(' + currentNPS + ')</b></span></td>';
+                }
+                else if (index != currentNPS) {
+                    htmlCells = htmlCells + '<td ' + setClass + '></td>';
+                }
+            }
+            htmlCells = htmlCells + '<td class="default" ><span style="color:black;"><b class="value">(' + currentNPS + ')</b></span></td>';
+            return htmlCells + "</tr><tr><td><div style='height:3px;'></div></td></tr>";
+        }
+    }
+</script>
+</body>
+
+</html>

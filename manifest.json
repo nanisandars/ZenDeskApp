@@ -1,0 +1,46 @@
+{
+  "name": "CloudCherry",
+  "author": {
+    "name": "CloudCherry",
+    "email": "09je1a0533@gmail.com",
+    "url": "https://lilvankahelp.zendesk.com"
+  },
+  "defaultLocale": "en",
+  "private": true,
+  "location": {
+    "support": {
+      "ticket_sidebar": "assets/iframe.html",
+      "user_sidebar": "assets/iframe.html"
+    }
+  },
+  "version": "1.0",
+  "frameworkVersion": "2.0",
+  "parameters": [
+    {
+      "name": "subdomain",
+      "type": "text",
+      "required": true,
+      "default": "lilvankahelp",
+      "secure": true
+    },
+    {
+      "name": "ccusername",
+      "type": "text",
+      "required": true,
+      "default": "lexiconadmin"
+    },
+    {
+      "name": "ccapikey",
+      "type": "text",
+      "required": true,
+      "default": "apikey-0vtuBBNfwno2ormVnb3lD7f9m*ykurhzdzVrXd60ntQ!"
+    }
+  ],
+  "domainWhitelist": [
+    "lexicontest.in",
+    "api.getcloudcherry.com",
+    "jsonplaceholder.typicode.com",
+    "cxapiconnect.getcloudcherry.com"
+  ]
+  //"domainWhitelist": [ "api.getcloudcherry.com", "{{setting.subdomain}}.herokuapp.com" , "jsonplaceholder.typicode.com"]
+}
